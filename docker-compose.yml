@@ -1,0 +1,15 @@
+services:
+  npu-embedding-server:
+    image: ghcr.io/cibernox/npu-embedding-server:latest
+    container_name: npu-embedding-server
+    restart: unless-stopped
+    devices:
+      - /dev/accel/accel0:/dev/accel/accel0
+    ports:
+      - "8100:8100"
+    volumes:
+      - /root/embedding-models:/models
+    environment:
+      - OPENVINO_DEVICE=NPU
+      - DEFAULT_BUCKET=64
+      - PORT=8100
