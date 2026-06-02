@@ -1,12 +1,15 @@
-FROM openvino/ubuntu24:2025.2.0
+FROM ubuntu:24.04
 
-USER root
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip curl ca-certificates && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Intel NPU userspace driver + Level Zero loader
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates python3-pip && \
-    curl -fL -O "https://github.com/oneapi-src/level-zero/releases/download/v1.28.6/libze1_1.28.6+u24.04_amd64.deb" && \
-    apt-get install -y --no-install-recommends ./libze1*.deb && rm -f ./libze1*.deb && \
+RUN curl -fL -O "https://github.com/oneapi-src/level-zero/releases/download/v1.28.6/libze1_1.28.6+u24.04_amd64.deb" && \
+    apt-get update && apt-get install -y --no-install-recommends ./libze1*.deb && rm -f ./libze1*.deb && \
     curl -fL -o npu.tar.gz \
         "https://github.com/intel/linux-npu-driver/releases/download/v1.32.1/linux-npu-driver-v1.32.1.20260422-24767473183-ubuntu2404.tar.gz" && \
     tar xzf npu.tar.gz && \
@@ -16,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN pip install --no-cache-dir --break-system-packages -r /app/requirements.txt
 
 COPY server.py /app/server.py
 
