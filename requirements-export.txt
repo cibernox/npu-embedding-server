@@ -1,0 +1,5 @@
+# Only needed to export OpenVINO IR buckets from the HF checkpoint (see README).
+# Not installed in the serving image: server.py never imports optimum-intel, so
+# shipping it only inflated the container.
+optimum-intel~=2.1.0
+torch

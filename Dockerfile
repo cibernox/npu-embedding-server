@@ -7,11 +7,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip curl ca-certificates && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Intel NPU userspace driver + Level Zero loader
-RUN curl -fL -O "https://github.com/oneapi-src/level-zero/releases/download/v1.28.6/libze1_1.28.6+u24.04_amd64.deb" && \
+# Intel NPU userspace driver + Level Zero loader.
+# Pinned deliberately: these two must be upgraded together and re-tested on the
+# NPU, so they should never float. v1.38.0 lists Arrow Lake as a verified
+# platform (Core Ultra 7 265K).
+RUN curl -fL -O "https://github.com/oneapi-src/level-zero/releases/download/v1.33.1/libze1_1.33.1+u24.04_amd64.deb" && \
     apt-get update && apt-get install -y --no-install-recommends ./libze1*.deb && rm -f ./libze1*.deb && \
     curl -fL -o npu.tar.gz \
-        "https://github.com/intel/linux-npu-driver/releases/download/v1.32.1/linux-npu-driver-v1.32.1.20260422-24767473183-ubuntu2404.tar.gz" && \
+        "https://github.com/intel/linux-npu-driver/releases/download/v1.38.0/linux-npu-driver-v1.38.0.20260910-34487311128-ubuntu2404.tar.gz" && \
     tar xzf npu.tar.gz && \
     apt-get install -y --no-install-recommends \
         ./intel-driver-compiler-npu_*.deb ./intel-fw-npu_*.deb ./intel-level-zero-npu_*.deb && \
