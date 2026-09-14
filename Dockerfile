@@ -26,6 +26,7 @@ COPY server.py /app/server.py
 ENV MODELS_DIR=/models \
     OPENVINO_DEVICE=NPU \
     DEFAULT_BUCKET=64 \
+    POOLING=last_token \
     PORT=8100 \
     NPU_CACHE_DIR=/models/npu_cache
 
