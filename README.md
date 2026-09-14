@@ -33,18 +33,26 @@ Input longer than the active bucket is truncated, and the discarded content is s
 
 ## Performance (Intel Core Ultra 7 265K, NPU 3.7, FP32, measured)
 
-| Workload | Bucket | p50 |
-|---|---|---|
-| Search query, ~11 tok | 64 | **50 ms** |
-| Search query padded to ~95 tok | 512 | 282 ms |
-| Document chunk, ~405 tok | 512 | 289 ms |
-| Batch of 4 chunks | 512 | 1,091 ms (273 ms/chunk) |
-| Batch of 16 chunks | 512 | 4,325 ms (270 ms/chunk) |
-| Batch of 32 chunks | 512 | 8,558 ms (267 ms/chunk) |
-| Bucket switch (cached) | — | ~800 ms |
-| First request after start (cold compile) | — | ~1.4 s |
+Measured on NPU with openvino 2026.3.1 + linux-npu-driver v1.38.0.
 
-Batching saves HTTP round trips but not compute — inputs are embedded in a loop, so per-chunk cost is flat at ~270 ms. Embedding a 677-chunk corpus takes ~3 minutes.
+| Workload | Bucket | p50 | p95 |
+|---|---|---|---|
+| Search query, ~11 tok | 64 | **46 ms** | 118 ms |
+| Search query padded to ~95 tok | 512 | 277 ms | 371 ms |
+| Document chunk, ~405 tok | 512 | 314 ms | 363 ms |
+| Batch of 4 chunks | 512 | 1,049 ms (262 ms/chunk) | |
+| Batch of 16 chunks | 512 | 4,192 ms (262 ms/chunk) | |
+| Batch of 32 chunks | 512 | 8,268 ms (258 ms/chunk) | |
+| Bucket switch (cached) | — | ~1,000 ms | |
+| Cold compile, empty cache | — | 8.2 s | |
+
+Batching saves HTTP round trips but not compute — inputs are embedded in a loop, so per-chunk cost is flat at ~260 ms. Embedding a 677-chunk corpus takes **~3 minutes**.
+
+The driver/OpenVINO bump was worth ~2-4% (queries 50 -> 46 ms, ingest 270 -> 262 ms/chunk) — parity rather than a speedup, so treat it as maintenance, not optimization.
+
+### NPU vs CPU numerics
+
+`tools/probe_compare.py` across 11 mixed probes: **min 0.999946, mean 0.999990**. The NPU is numerically equivalent to the CPU runner for practical purposes, so a CPU fallback can serve queries against an NPU-built index. Drift grows with input length (the longest probe is the 0.999946), which is why the probe set spans short queries through multi-hundred-token passages rather than testing one short string.
 
 ## Quick Start
 
@@ -140,6 +148,17 @@ Lists available bucket variants. Authenticated.
 | `API_KEY` | _(unset)_ | Bearer token for `/v1/*`. **Unset means no auth** — only safe on a trusted LAN |
 | `PORT` | `8100` | Server port |
 | `NPU_CACHE_DIR` | `/models/npu_cache` | NPU compilation cache |
+
+## Verifying vector-space compatibility
+
+Before pointing a client at two endpoints — a local server and a hosted fallback, or two differently-configured deployments — confirm they agree:
+
+```bash
+tools/probe_compare.py http://npu-host:8100 https://api.deepinfra.com/v1/openai \
+  --key-b "$DEEPINFRA_TOKEN" --threshold 0.999
+```
+
+Exits non-zero if any probe falls short. A dimension mismatch fails immediately. Remember that agreement requires the same model *and* the same pooling *and* the same instruction prefixing.
 
 ## Pinned dependencies
 
