@@ -155,10 +155,22 @@ Before pointing a client at two endpoints — a local server and a hosted fallba
 
 ```bash
 tools/probe_compare.py http://npu-host:8100 https://api.deepinfra.com/v1/openai \
-  --key-b "$DEEPINFRA_TOKEN" --threshold 0.999
+  --key-a "$NPU_KEY" --key-b "$DEEPINFRA_TOKEN" \
+  --model-b Qwen/Qwen3-Embedding-0.6B --threshold 0.999
 ```
 
 Exits non-zero if any probe falls short. A dimension mismatch fails immediately. Remember that agreement requires the same model *and* the same pooling *and* the same instruction prefixing.
+
+**Verified pairing (2026-09-14):** this server vs **DeepInfra** `Qwen/Qwen3-Embedding-0.6B` — **min 0.999820, mean 0.999868: PASS**. Same 1024 dims, and ranking is identical (all three Willow regression queries at rank 1 through either endpoint). The residual ~0.00018 is precision, not pooling; a pooling mismatch scores ~0.6-0.8, not 0.9998. So the two can serve one index interchangeably.
+
+Two DeepInfra defaults differ from this server and must be pinned when calling it:
+
+- **`normalize` defaults to `false`** here it is always on. Their OpenAI-compatible route (`/v1/openai/embeddings`) does return L2-normalised vectors; their native route does not. Cosine is scale-invariant so ranking survives either way, but pgvector's inner-product operator (`<#>`) would silently break.
+- **`custom_instruction`** lets them prepend Qwen's instruction template server-side. This server never templates, so leave it empty and prepend client-side, keeping both sides byte-identical.
+
+Their URL convention also differs: the base already carries the version (`/v1/openai` + `/embeddings`), which is why `endpoint/1` in the tool branches on whether `/v1` is already present.
+
+Latency for reference, measured from a Hetzner host: DeepInfra p50 206 ms / p95 414 ms (with occasional multi-second cold starts — one 7 s call in 45); this server over a Cloudflare tunnel p50 215 ms / p95 222 ms. Comparable medians; the self-hosted tail is tighter when the tunnel is healthy.
 
 ## Pinned dependencies
 

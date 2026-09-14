@@ -48,13 +48,31 @@ PROBES = [
 ]
 
 
-def embed(base, texts, key=None):
-    payload = json.dumps({"input": texts}).encode()
+def endpoint(base):
+    """Resolve a base URL to its embeddings endpoint.
+
+    Conventions differ: this server is rooted at the host (so /v1/embeddings),
+    while DeepInfra's OpenAI-compatible base already carries the version
+    (https://api.deepinfra.com/v1/openai -> /embeddings). Appending blindly
+    produces .../v1/openai/v1/embeddings and a 404.
+    """
+    base = base.rstrip("/")
+    if base.endswith("/embeddings"):
+        return base
+    return base + ("/embeddings" if "/v1" in base else "/v1/embeddings")
+
+
+def embed(base, texts, key=None, model=None):
+    payload = {"input": texts}
+    if model:
+        # Hosted providers require an explicit model; this server ignores the
+        # field (bucket is chosen by input length), so it is harmless either way.
+        payload["model"] = model
+    data = json.dumps(payload).encode()
     headers = {"Content-Type": "application/json"}
     if key:
         headers["Authorization"] = f"Bearer {key}"
-    req = urllib.request.Request(base.rstrip("/") + "/v1/embeddings",
-                                 data=payload, headers=headers)
+    req = urllib.request.Request(endpoint(base), data=data, headers=headers)
     try:
         body = json.load(urllib.request.urlopen(req, timeout=300))
     except urllib.error.HTTPError as e:
@@ -77,13 +95,15 @@ def main():
     ap.add_argument("url_b")
     ap.add_argument("--key-a")
     ap.add_argument("--key-b")
+    ap.add_argument("--model-a")
+    ap.add_argument("--model-b")
     ap.add_argument("--threshold", type=float, default=0.999)
     args = ap.parse_args()
 
     # One input per request: batching can select a different bucket than a
     # caller would use in production, which is itself a source of divergence.
-    va = [embed(args.url_a, [p], args.key_a)[0] for p in PROBES]
-    vb = [embed(args.url_b, [p], args.key_b)[0] for p in PROBES]
+    va = [embed(args.url_a, [p], args.key_a, args.model_a)[0] for p in PROBES]
+    vb = [embed(args.url_b, [p], args.key_b, args.model_b)[0] for p in PROBES]
 
     if len(va[0]) != len(vb[0]):
         sys.exit(f"FAIL dimension mismatch: {len(va[0])} vs {len(vb[0])} "
