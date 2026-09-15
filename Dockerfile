@@ -31,8 +31,9 @@ ENV MODELS_DIR=/models \
     DEFAULT_BUCKET=64 \
     POOLING=last_token \
     PORT=8100 \
+    METRICS_PORT=8101 \
     NPU_CACHE_DIR=/models/npu_cache
 
-EXPOSE 8100
+EXPOSE 8100 8101
 
 CMD ["python3", "/app/server.py"]

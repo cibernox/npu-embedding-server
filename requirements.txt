@@ -7,3 +7,6 @@ uvicorn~=0.48.0
 transformers~=4.57.6
 numpy~=2.4.6
 openvino~=2026.3.1
+# No transitive deps. Serves /metrics on the dedicated metrics port; the API
+# port stays untouched (see server.py).
+prometheus-client~=0.26.0

@@ -7,6 +7,8 @@ services:
       - /dev/accel/accel0:/dev/accel/accel0
     ports:
       - "8100:8100"
+      # Prometheus metrics. LAN only: never put this port behind the tunnel.
+      - "8101:8101"
     volumes:
       - /root/embedding-models:/models
     environment:
@@ -16,5 +18,6 @@ services:
       - DEFAULT_BUCKET=64
       - POOLING=last_token
       - PORT=8100
+      - METRICS_PORT=8101
       # Required if this is reachable from outside the LAN. Unset = no auth.
       - API_KEY=${NPU_EMBEDDING_API_KEY:-}

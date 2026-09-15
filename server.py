@@ -8,6 +8,7 @@ import numpy as np
 import openvino as ov
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
+from prometheus_client import Counter, Gauge, Histogram, start_http_server
 from pydantic import BaseModel
 from transformers import AutoTokenizer
 
@@ -15,6 +16,7 @@ MODELS_DIR = os.environ.get("MODELS_DIR", "/models")
 DEVICE = os.environ.get("OPENVINO_DEVICE", "NPU")
 DEFAULT_BUCKET = int(os.environ.get("DEFAULT_BUCKET", "64"))
 PORT = int(os.environ.get("PORT", "8100"))
+METRICS_PORT = int(os.environ.get("METRICS_PORT", "8101"))
 CACHE_DIR = os.environ.get("NPU_CACHE_DIR", f"{MODELS_DIR}/npu_cache")
 API_KEY = os.environ.get("API_KEY", "").strip()
 
@@ -39,6 +41,67 @@ buckets = {}
 current_bucket = None
 compiled_model = None
 bucket_switches = 0
+
+# Prometheus metrics on a dedicated port, not a route on the API port: the API
+# port is exposed to the internet via a tunnel, and traffic metrics (request
+# rates, token volumes) are usage telemetry, not something to publish. The
+# metrics server serves only /metrics and is never published outside the LAN.
+requests_total = Counter(
+    "npu_embedding_requests_total",
+    "HTTP requests by endpoint and status code.",
+    ["endpoint", "status"],
+)
+request_duration_seconds = Histogram(
+    "npu_embedding_request_duration_seconds",
+    "Request latency in seconds.",
+    ["endpoint"],
+    # Buckets tuned to the measured NPU latency range (46 ms query through the
+    # ~1 s bucket switch); the default scale is too coarse below 100 ms.
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.75, 1.0, 2.5, 5.0, 10.0),
+)
+tokens_total = Counter(
+    "npu_embedding_tokens_total",
+    "Input tokens fed to the model (post-truncation, pre-padding).",
+    ["bucket"],
+)
+inputs_total = Counter(
+    "npu_embedding_inputs_total",
+    "Input texts embedded, summed over request batches.",
+    ["bucket"],
+)
+truncated_inputs_total = Counter(
+    "npu_embedding_truncated_inputs_total",
+    "Input texts truncated to the bucket limit.",
+)
+bucket_switches_total = Counter(
+    "npu_embedding_bucket_switches_total",
+    "Bucket recompile switches.",
+)
+current_bucket_gauge = Gauge(
+    "npu_embedding_current_bucket",
+    "Bucket the compiled model currently serves.",
+)
+active_requests = Gauge(
+    "npu_embedding_active_requests",
+    "Requests currently in flight.",
+)
+
+
+@app.middleware("http")
+async def metrics_middleware(request, call_next):
+    endpoint = request.url.path
+    active_requests.inc()
+    start = time.monotonic()
+    try:
+        response = await call_next(request)
+    except Exception:
+        requests_total.labels(endpoint, "500").inc()
+        raise
+    finally:
+        active_requests.dec()
+    requests_total.labels(endpoint, str(response.status_code)).inc()
+    request_duration_seconds.labels(endpoint).observe(time.monotonic() - start)
+    return response
 
 
 def require_auth(authorization: Optional[str] = Header(default=None)):
@@ -89,6 +152,7 @@ def load_bucket(size):
     # The counter is here purely so an unexpected thrash pattern is visible.
     if current_bucket is not None:
         bucket_switches += 1
+        bucket_switches_total.inc()
         print(
             f"[embed] bucket switch {current_bucket} -> {size} "
             f"(total switches: {bucket_switches})",
@@ -104,6 +168,7 @@ def load_bucket(size):
     config = {"CACHE_DIR": CACHE_DIR} if DEVICE == "NPU" else {}
     compiled_model = core.compile_model(model, DEVICE, config=config)
     current_bucket = size
+    current_bucket_gauge.set(size)
     print(f"[embed] Loaded {size}-token bucket in {time.time()-start:.1f}s", flush=True)
 
 
@@ -183,6 +248,10 @@ def create_embeddings(req: EmbeddingRequest):
             flush=True,
         )
 
+    tokens_total.labels(str(current_bucket)).inc(total_tokens)
+    inputs_total.labels(str(current_bucket)).inc(len(inputs))
+    truncated_inputs_total.inc(truncated)
+
     return {
         "object": "list",
         "data": embeddings,
@@ -255,6 +324,8 @@ def main():
 
     os.makedirs(CACHE_DIR, exist_ok=True)
     load_bucket(DEFAULT_BUCKET if DEFAULT_BUCKET in buckets else min(buckets.keys()))
+    start_http_server(METRICS_PORT, addr="0.0.0.0")
+    print(f"[embed] Metrics: :{METRICS_PORT}/metrics (LAN only — never tunnel it)", flush=True)
     uvicorn.run(app, host="0.0.0.0", port=PORT)
 
 

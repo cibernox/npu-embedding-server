@@ -62,6 +62,7 @@ docker run -d --name npu-embedding-server \
   -v /path/to/models:/models \
   -e API_KEY=your-secret \
   -p 8100:8100 \
+  -p 8101:8101 \
   ghcr.io/cibernox/npu-embedding-server:latest
 ```
 
@@ -137,6 +138,27 @@ Unauthenticated, so clients can health-check without credentials.
 
 Lists available bucket variants. Authenticated.
 
+## Metrics
+
+The server exposes Prometheus metrics on a **dedicated port** (`METRICS_PORT`, default **8101**) — not as a route on the API port. The API port is typically exposed to the internet via a tunnel, and traffic metrics are usage telemetry, not something to publish. The metrics endpoint has no auth and serves only `/metrics`; keep it LAN-only and never tunnel it.
+
+```bash
+curl http://localhost:8101/metrics
+```
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `npu_embedding_tokens_total` | counter | `bucket` | **Tokens fed to the model** (post-truncation, pre-padding). The embeddings analogue of "tokens used": inputs only — the output is a fixed 1024-dim vector, so there is no output-token concept |
+| `npu_embedding_inputs_total` | counter | `bucket` | Input texts embedded, summed over request batches |
+| `npu_embedding_truncated_inputs_total` | counter | — | Inputs truncated to the bucket limit |
+| `npu_embedding_requests_total` | counter | `endpoint`, `status` | HTTP requests by endpoint and status code |
+| `npu_embedding_request_duration_seconds` | histogram | `endpoint` | Latency; buckets tuned to the measured 46 ms – 1 s NPU range |
+| `npu_embedding_active_requests` | gauge | — | Requests currently in flight |
+| `npu_embedding_current_bucket` | gauge | — | Bucket the compiled model serves |
+| `npu_embedding_bucket_switches_total` | counter | — | Bucket recompile switches (mirrors `bucket_switches` in `/health`) |
+
+The `bucket` label splits **queries** (small bucket) from **ingestion** (large bucket), so a dashboard can show the two workloads separately.
+
 ## Configuration
 
 | Env var | Default | Description |
@@ -146,7 +168,8 @@ Lists available bucket variants. Authenticated.
 | `POOLING` | `last_token` | `last_token` (correct) or `mean` (legacy; different vector space) |
 | `DEFAULT_BUCKET` | `64` | Bucket loaded at startup; falls back to the smallest available |
 | `API_KEY` | _(unset)_ | Bearer token for `/v1/*`. **Unset means no auth** — only safe on a trusted LAN |
-| `PORT` | `8100` | Server port |
+| `PORT` | `8100` | API server port |
+| `METRICS_PORT` | `8101` | Prometheus metrics port (LAN only — never tunnel it) |
 | `NPU_CACHE_DIR` | `/models/npu_cache` | NPU compilation cache |
 
 ## Verifying vector-space compatibility
